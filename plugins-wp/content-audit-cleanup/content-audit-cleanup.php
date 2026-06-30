@@ -3,7 +3,7 @@
  * Plugin Name: Content Audit & Cleanup (Universal)
  * Plugin URI: https://aiconteudo.com.br
  * Description: Auditoria e limpeza de conteúdo para qualquer nicho. Classifica posts (Manter, Fundir, Noindex, Remover, Revisar, Precisa Atualizar), detecta sitemap apontando para domínio de staging, e prepara posts desatualizados para reescrita via GEO Método SEO.
- * Version: 2.1.0
+ * Version: 2.2.0
  * Author: Alison Jean
  * Text Domain: content-audit-cleanup
  */
@@ -12,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'CAC_VERSION', '2.1.0' );
+define( 'CAC_VERSION', '2.2.0' );
 define( 'CAC_META_STATUS',      '_cac_audit_status' );
 define( 'CAC_META_NOINDEX',     '_cac_noindex_applied' );
 define( 'CAC_META_NEEDS_UPDATE','_cac_needs_update' );
@@ -24,6 +24,8 @@ define( 'CAC_OPTION_SITEMAP_URL',    'cac_sitemap_url' );
 define( 'CAC_BATCH_SIZE',       200 );  // posts por lote em run_auto_audit / run_stale_scan
 define( 'CAC_SITEMAP_BATCH',    100 );  // posts por lote na varredura de sitemap
 define( 'CAC_PAGE_SIZE',         50 );  // posts por página na tela de auditoria
+define( 'CAC_SEMANTIC_BATCH',    50 );  // posts por lote na classificação semântica via IA
+define( 'CAC_STAGING_META_BACKUP', '_cac_staging_content_backup' );
 
 class Content_Audit_Cleanup {
 
@@ -38,11 +40,15 @@ class Content_Audit_Cleanup {
 
     private function __construct() {
         add_action( 'admin_menu', array( $this, 'register_menu' ) );
-        add_action( 'admin_post_cac_apply_action',   array( $this, 'handle_bulk_action' ) );
-        add_action( 'admin_post_cac_save_settings',  array( $this, 'handle_save_settings' ) );
-        add_action( 'admin_post_cac_check_sitemap',  array( $this, 'handle_check_sitemap' ) );
-        add_action( 'admin_post_cac_export_config',  array( $this, 'handle_export_config' ) );
-        add_action( 'admin_post_cac_import_config',  array( $this, 'handle_import_config' ) );
+        add_action( 'admin_post_cac_apply_action',       array( $this, 'handle_bulk_action' ) );
+        add_action( 'admin_post_cac_save_settings',      array( $this, 'handle_save_settings' ) );
+        add_action( 'admin_post_cac_check_sitemap',      array( $this, 'handle_check_sitemap' ) );
+        add_action( 'admin_post_cac_export_config',      array( $this, 'handle_export_config' ) );
+        add_action( 'admin_post_cac_import_config',      array( $this, 'handle_import_config' ) );
+        add_action( 'admin_post_cac_staging_dry_run',    array( $this, 'handle_staging_dry_run' ) );
+        add_action( 'admin_post_cac_apply_staging_fix',  array( $this, 'handle_apply_staging_fix' ) );
+        add_action( 'admin_post_cac_run_semantic_batch', array( $this, 'handle_run_semantic_batch' ) );
+        add_action( 'admin_post_cac_apply_semantic',     array( $this, 'handle_apply_semantic_suggestions' ) );
 
         add_filter( 'manage_posts_columns',       array( $this, 'add_audit_column' ) );
         add_action( 'manage_posts_custom_column', array( $this, 'render_audit_column' ), 10, 2 );
@@ -69,6 +75,14 @@ class Content_Audit_Cleanup {
         add_submenu_page(
             'content-audit-cleanup', 'Verificação de Sitemap', 'Sitemap',
             'manage_options', 'cac-sitemap', array( $this, 'render_sitemap_page' )
+        );
+        add_submenu_page(
+            'content-audit-cleanup', 'Correção de Staging', 'Staging',
+            'manage_options', 'cac-staging', array( $this, 'render_staging_fix_page' )
+        );
+        add_submenu_page(
+            'content-audit-cleanup', 'IA Semântica (Camada 2)', 'IA Semântica',
+            'manage_options', 'cac-semantic', array( $this, 'render_semantic_page' )
         );
     }
 
@@ -796,20 +810,34 @@ class Content_Audit_Cleanup {
         $offset = 0;
 
         do {
+            // Camada 1: inclui título + primeiros 2000 chars do conteúdo + nomes de categorias/tags.
             $rows = $wpdb->get_results( $wpdb->prepare(
-                "SELECT ID, post_title FROM {$wpdb->posts}
-                 WHERE post_type = 'post'
-                   AND post_status IN ('publish','draft','pending')
-                 ORDER BY ID ASC LIMIT %d OFFSET %d",
+                "SELECT p.ID, p.post_title,
+                        SUBSTRING(p.post_content, 1, 2000) AS content_excerpt,
+                        GROUP_CONCAT(t.name SEPARATOR ' ') AS term_names
+                 FROM {$wpdb->posts} p
+                 LEFT JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.ID
+                 LEFT JOIN {$wpdb->term_taxonomy} tt
+                        ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                       AND tt.taxonomy IN ('category','post_tag')
+                 LEFT JOIN {$wpdb->terms} t ON t.term_id = tt.term_id
+                 WHERE p.post_type = 'post'
+                   AND p.post_status IN ('publish','draft','pending')
+                 GROUP BY p.ID
+                 ORDER BY p.ID ASC LIMIT %d OFFSET %d",
                 CAC_BATCH_SIZE, $offset
             ) );
 
             foreach ( $rows as $row ) {
-                $title   = mb_strtolower( $row->post_title );
-                $matched = null;
+                $haystack = mb_strtolower(
+                    $row->post_title . ' ' .
+                    ( $row->content_excerpt ?? '' ) . ' ' .
+                    ( $row->term_names ?? '' )
+                );
+                $matched  = null;
 
                 foreach ( $kw_map as $kw => $status ) {
-                    if ( mb_strpos( $title, $kw ) !== false ) {
+                    if ( mb_strpos( $haystack, $kw ) !== false ) {
                         $matched = $status;
                         break;
                     }
@@ -983,6 +1011,512 @@ class Content_Audit_Cleanup {
                 echo '<meta name="robots" content="noindex, follow" />' . "\n";
             }
         }
+    }
+
+    /* ─────────────────────── STAGING FIX ──────────────────────────── */
+
+    /**
+     * Agrupa os resultados do último scan por tipo de fonte.
+     */
+    private function analyze_staging_scan_results( array $found ): array {
+        $groups = [ 'posts' => [], 'sitemap_xml' => [], 'widgets' => [], 'customizer' => [], 'robots' => [], 'other' => [] ];
+        foreach ( $found as $item ) {
+            $t = $item['title'];
+            if ( strpos( $t, 'Sitemap XML' ) !== false ) {
+                $groups['sitemap_xml'][] = $item;
+            } elseif ( strpos( $t, 'Widget' ) !== false ) {
+                $groups['widgets'][] = $item;
+            } elseif ( strpos( $t, 'Customizer' ) !== false ) {
+                $groups['customizer'][] = $item;
+            } elseif ( strpos( $t, 'robots' ) !== false || strpos( $t, 'robots.txt' ) !== false ) {
+                $groups['robots'][] = $item;
+            } elseif ( preg_match('/\((post|page)\)$/i', $t) ) {
+                $groups['posts'][] = $item;
+            } else {
+                $groups['other'][] = $item;
+            }
+        }
+        return $groups;
+    }
+
+    /**
+     * Extrai os hosts de staging únicos presentes nos resultados do scan.
+     */
+    private function detect_staging_domains( array $found ): array {
+        $production_host = wp_parse_url( home_url(), PHP_URL_HOST );
+        $domains = [];
+        foreach ( $found as $item ) {
+            $host = wp_parse_url( $item['url'], PHP_URL_HOST );
+            if ( $host && $host !== $production_host && ! in_array( $host, $domains, true ) ) {
+                $domains[] = $host;
+            }
+        }
+        return $domains;
+    }
+
+    /**
+     * Simula a substituição de domínio sem escrever no BD.
+     * Retorna lista de posts que seriam afetados.
+     */
+    private function staging_dry_run( string $staging_domain ): array {
+        global $wpdb;
+        $production_host = wp_parse_url( home_url(), PHP_URL_HOST );
+        $changes = [];
+
+        $rows = $wpdb->get_results( $wpdb->prepare(
+            "SELECT ID, post_title, post_content
+             FROM {$wpdb->posts}
+             WHERE post_type IN ('post','page')
+               AND post_status IN ('publish','draft','pending')
+               AND post_content LIKE %s
+             LIMIT 300",
+            '%' . $wpdb->esc_like( $staging_domain ) . '%'
+        ) );
+
+        foreach ( $rows as $row ) {
+            $count = substr_count( $row->post_content, $staging_domain );
+            if ( $count < 1 ) continue;
+            // Pega a primeira URL de staging encontrada como exemplo
+            preg_match( '/https?:\/\/[^\s"\'<>]*' . preg_quote( $staging_domain, '/' ) . '[^\s"\'<>]*/i', $row->post_content, $sample );
+            $changes[] = [
+                'post_id'    => (int) $row->ID,
+                'post_title' => $row->post_title,
+                'url_count'  => $count,
+                'sample_url' => $sample[0] ?? $staging_domain,
+                'would_become' => preg_replace( '/(https?:\/\/)' . preg_quote( $staging_domain, '/' ) . '/i', '$1' . $production_host, $sample[0] ?? $staging_domain ),
+                'edit_link'  => get_edit_post_link( (int) $row->ID, '' ),
+            ];
+        }
+
+        return $changes;
+    }
+
+    public function handle_staging_dry_run(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Sem permissão.' );
+        check_admin_referer( 'cac_staging_dry_run' );
+
+        $staging_domain = sanitize_text_field( $_POST['staging_domain'] ?? '' );
+        if ( empty( $staging_domain ) || ! preg_match( '/^[a-zA-Z0-9._-]+$/', $staging_domain ) ) {
+            wp_safe_redirect( admin_url( 'admin.php?page=cac-staging&error=invalid_domain' ) );
+            exit;
+        }
+
+        $changes = $this->staging_dry_run( $staging_domain );
+        update_option( 'cac_staging_dry_run_results', [
+            'changes'        => $changes,
+            'staging_domain' => $staging_domain,
+            'ran_at'         => current_time( 'd/m/Y H:i' ),
+        ], false );
+
+        wp_safe_redirect( admin_url( 'admin.php?page=cac-staging&dry_run=1' ) );
+        exit;
+    }
+
+    public function handle_apply_staging_fix(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Sem permissão.' );
+        check_admin_referer( 'cac_apply_staging_fix' );
+
+        $staging_domain = sanitize_text_field( $_POST['staging_domain'] ?? '' );
+        if ( empty( $staging_domain ) || ! preg_match( '/^[a-zA-Z0-9._-]+$/', $staging_domain ) ) {
+            wp_safe_redirect( admin_url( 'admin.php?page=cac-staging&error=invalid_domain' ) );
+            exit;
+        }
+
+        // Exige que o dry run tenha sido feito com este mesmo domínio
+        $dry = get_option( 'cac_staging_dry_run_results', [] );
+        if ( empty( $dry ) || ( $dry['staging_domain'] ?? '' ) !== $staging_domain ) {
+            wp_safe_redirect( admin_url( 'admin.php?page=cac-staging&error=no_dry_run' ) );
+            exit;
+        }
+
+        global $wpdb;
+        $production_host = wp_parse_url( home_url(), PHP_URL_HOST );
+        $fixed = 0;
+
+        foreach ( $dry['changes'] as $item ) {
+            $post_id = (int) $item['post_id'];
+            $post    = get_post( $post_id );
+            if ( ! $post ) continue;
+
+            // Backup do conteúdo original (não sobrescreve backup existente)
+            if ( ! get_post_meta( $post_id, CAC_STAGING_META_BACKUP, true ) ) {
+                update_post_meta( $post_id, CAC_STAGING_META_BACKUP, $post->post_content );
+            }
+
+            // Substituição segura: apenas o domínio, preserva paths e query strings
+            $new_content = preg_replace(
+                '/(https?:\/\/)' . preg_quote( $staging_domain, '/' ) . '/i',
+                '$1' . $production_host,
+                $post->post_content
+            );
+
+            if ( $new_content !== $post->post_content ) {
+                $wpdb->update(
+                    $wpdb->posts,
+                    [ 'post_content' => $new_content ],
+                    [ 'ID'           => $post_id ],
+                    [ '%s' ],
+                    [ '%d' ]
+                );
+                clean_post_cache( $post_id );
+                $fixed++;
+            }
+        }
+
+        // Limpa o dry run armazenado após aplicar
+        delete_option( 'cac_staging_dry_run_results' );
+
+        wp_safe_redirect( admin_url( 'admin.php?page=cac-staging&fixed=' . $fixed ) );
+        exit;
+    }
+
+    public function render_staging_fix_page(): void {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'Sem permissão.', 'content-audit-cleanup' ) );
+        }
+
+        $results  = get_option( 'cac_sitemap_scan_results', [] );
+        $dry      = get_option( 'cac_staging_dry_run_results', [] );
+        $found    = $results['found'] ?? [];
+        $groups   = ! empty( $found ) ? $this->analyze_staging_scan_results( $found ) : [];
+        $domains  = ! empty( $found ) ? $this->detect_staging_domains( $found ) : [];
+        $post_count = count( $groups['posts'] ?? [] );
+        $sitemap_count = count( $groups['sitemap_xml'] ?? [] );
+        ?>
+        <div class="wrap">
+            <h1>🔧 Correção de Links de Staging</h1>
+
+            <?php if ( isset( $_GET['fixed'] ) ) : ?>
+                <div class="notice notice-success"><p>✅ <strong><?php echo (int) $_GET['fixed']; ?> post(s)</strong> corrigidos com sucesso. <a href="<?php echo esc_url( admin_url('admin.php?page=cac-sitemap') ); ?>">Execute o scan de sitemap novamente</a> para confirmar.</p></div>
+            <?php endif; ?>
+            <?php if ( isset( $_GET['error'] ) ) : ?>
+                <div class="notice notice-error"><p>Erro: <?php echo esc_html( $_GET['error'] === 'no_dry_run' ? 'Execute o Dry Run primeiro antes de aplicar.' : 'Domínio inválido.' ); ?></p></div>
+            <?php endif; ?>
+
+            <?php if ( empty( $found ) ) : ?>
+                <div class="notice notice-warning"><p>Nenhum resultado de scan disponível. <a href="<?php echo esc_url( admin_url('admin.php?page=cac-sitemap') ); ?>">Execute o scan de sitemap primeiro.</a></p></div>
+            <?php else : ?>
+
+            <h2>Diagnóstico — Distribuição dos <?php echo count( $found ); ?> links encontrados</h2>
+            <table class="widefat" style="max-width:600px;margin-bottom:20px;">
+                <thead><tr><th>Fonte</th><th>Quantidade</th><th>Ação necessária</th></tr></thead>
+                <tbody>
+                    <tr><td>Posts/Páginas (post_content)</td><td><strong><?php echo $post_count; ?></strong></td><td>Substituição automática disponível ↓</td></tr>
+                    <tr><td>Sitemap XML (&lt;loc&gt; errado)</td><td><strong><?php echo $sitemap_count; ?></strong></td><td>Regenerar sitemap no Rank Math ↓</td></tr>
+                    <tr><td>Widgets</td><td><strong><?php echo count( $groups['widgets'] ?? [] ); ?></strong></td><td>Editar manualmente em Aparência → Widgets</td></tr>
+                    <tr><td>Customizer</td><td><strong><?php echo count( $groups['customizer'] ?? [] ); ?></strong></td><td>Editar manualmente em Personalizar</td></tr>
+                    <tr><td>robots.txt</td><td><strong><?php echo count( $groups['robots'] ?? [] ); ?></strong></td><td>Editar via Rank Math → Geral</td></tr>
+                </tbody>
+            </table>
+
+            <?php if ( $sitemap_count > 0 ) : ?>
+            <div class="notice notice-info" style="padding:12px 15px;">
+                <strong>ℹ️ Causa raiz do sitemap:</strong> <?php echo $sitemap_count; ?> entradas &lt;loc&gt; com host incorreto significam que o sitemap foi gerado enquanto o site estava em ambiente de staging.
+                <strong>Solução:</strong> Em Rank Math → Sitemap, clique em "Limpar e regenerar sitemap". Isso substituirá todas as entradas com o domínio correto (<code><?php echo esc_html( wp_parse_url( home_url(), PHP_URL_HOST ) ); ?></code>) sem precisar editar cada post.
+                <br><a class="button button-secondary" style="margin-top:8px;" href="<?php echo esc_url( admin_url('admin.php?page=rank-math-sitemap') ); ?>" target="_blank">Ir para Rank Math Sitemap →</a>
+            </div>
+            <?php endif; ?>
+
+            <?php if ( $post_count > 0 && ! empty( $domains ) ) : ?>
+            <h2 style="margin-top:25px;">Passo 1: Dry Run — ver o que seria alterado</h2>
+            <p>Domínio de staging detectado: <code><?php echo esc_html( implode( ', ', $domains ) ); ?></code></p>
+            <p>O dry run mostra exatamente quais posts seriam alterados e como, <strong>sem escrever nada no banco</strong>.</p>
+
+            <form method="post" action="<?php echo esc_url( admin_url('admin-post.php') ); ?>">
+                <?php wp_nonce_field( 'cac_staging_dry_run' ); ?>
+                <input type="hidden" name="action" value="cac_staging_dry_run">
+                <input type="hidden" name="staging_domain" value="<?php echo esc_attr( $domains[0] ?? '' ); ?>">
+                <button type="submit" class="button button-secondary">🔍 Executar Dry Run</button>
+            </form>
+            <?php endif; ?>
+
+            <?php if ( isset( $_GET['dry_run'] ) && ! empty( $dry ) ) : ?>
+            <h2 style="margin-top:25px;">Resultado do Dry Run (<?php echo esc_html( $dry['ran_at'] ?? '' ); ?>)</h2>
+            <?php if ( empty( $dry['changes'] ) ) : ?>
+                <div class="notice notice-success"><p>✅ Nenhum post com links de staging no conteúdo.</p></div>
+            <?php else : ?>
+                <p>Os seguintes <strong><?php echo count( $dry['changes'] ); ?> posts</strong> seriam alterados:</p>
+                <table class="widefat" style="margin-bottom:20px;">
+                    <thead><tr><th>Post</th><th>Qtd URLs</th><th>Exemplo de mudança</th></tr></thead>
+                    <tbody>
+                    <?php foreach ( array_slice( $dry['changes'], 0, 50 ) as $chg ) : ?>
+                        <tr>
+                            <td><a href="<?php echo esc_url( $chg['edit_link'] ); ?>" target="_blank"><?php echo esc_html( $chg['post_title'] ); ?></a></td>
+                            <td><?php echo (int) $chg['url_count']; ?></td>
+                            <td style="font-size:11px;"><del><?php echo esc_html( mb_substr( $chg['sample_url'], 0, 80 ) ); ?></del><br>→ <?php echo esc_html( mb_substr( $chg['would_become'], 0, 80 ) ); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+
+                <div class="notice notice-warning"><p>⚠️ Confirme antes de aplicar: o conteúdo original de cada post será salvo no meta <code><?php echo CAC_STAGING_META_BACKUP; ?></code> para recuperação manual se necessário.</p></div>
+
+                <form method="post" action="<?php echo esc_url( admin_url('admin-post.php') ); ?>">
+                    <?php wp_nonce_field( 'cac_apply_staging_fix' ); ?>
+                    <input type="hidden" name="action" value="cac_apply_staging_fix">
+                    <input type="hidden" name="staging_domain" value="<?php echo esc_attr( $dry['staging_domain'] ); ?>">
+                    <button type="submit" class="button button-primary" onclick="return confirm('Aplicar correção em <?php echo count( $dry['changes'] ); ?> posts? O conteúdo original será salvo como backup.');">
+                        ✅ Aplicar correção em <?php echo count( $dry['changes'] ); ?> posts
+                    </button>
+                </form>
+            <?php endif; ?>
+            <?php endif; ?>
+
+            <?php endif; ?>
+        </div>
+        <?php
+    }
+
+    /* ─────────────────────── IA SEMÂNTICA (CAMADA 2) ───────────────── */
+
+    /**
+     * Constrói o prompt barato de classificação semântica.
+     */
+    private function build_niche_check_prompt( string $niche, string $title, string $category, string $excerpt ): string {
+        $trecho = mb_substr( wp_strip_all_tags( $excerpt ), 0, 400 );
+        return <<<PROMPT
+Você é um classificador de conteúdo para sites WordPress.
+
+Nicho do site: {$niche}
+Título do post: {$title}
+Categoria: {$category}
+Trecho do conteúdo: {$trecho}
+
+Com base no nicho e no conteúdo acima, classifique este post com APENAS UMA palavra:
+- MANTER: conteúdo relevante e de qualidade para o nicho
+- NOINDEX: fora do nicho ou qualidade muito baixa (não indexar)
+- FUNDIR: provavelmente duplicado de outro post
+- REVISAR: relevante mas desatualizado ou incompleto
+- REMOVER: spam, sem valor, prejudicial à reputação
+
+Responda somente a palavra de classificação, nada mais.
+PROMPT;
+    }
+
+    /**
+     * Chama o GEO via filtro para classificação barata. Retorna string vazia se GEO indisponível.
+     */
+    private function call_geo_ai_cheap( string $prompt ): string {
+        return (string) apply_filters( 'cac_ai_cheap_classify', '', $prompt );
+    }
+
+    public function handle_run_semantic_batch(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Sem permissão.' );
+        check_admin_referer( 'cac_run_semantic_batch' );
+
+        // Reiniciar cursor se solicitado
+        if ( ! empty( $_POST['reset_cursor'] ) ) {
+            update_option( 'cac_semantic_audit_last_id', 0 );
+            update_option( 'cac_semantic_audit_processed', 0 );
+            wp_safe_redirect( admin_url( 'admin.php?page=cac-semantic&cursor_reset=1' ) );
+            exit;
+        }
+
+        global $wpdb;
+        $niche       = get_option( 'sara_niche', get_option( 'geo_niche', 'Geral' ) );
+        $last_id     = (int) get_option( 'cac_semantic_audit_last_id', 0 );
+        $processed   = 0;
+        $ai_available = has_filter( 'cac_ai_cheap_classify' );
+
+        if ( ! $ai_available ) {
+            wp_safe_redirect( admin_url( 'admin.php?page=cac-semantic&error=no_ai' ) );
+            exit;
+        }
+
+        $rows = $wpdb->get_results( $wpdb->prepare(
+            "SELECT p.ID, p.post_title,
+                    SUBSTRING(p.post_content, 1, 800) AS excerpt,
+                    GROUP_CONCAT(t.name SEPARATOR ', ') AS term_names
+             FROM {$wpdb->posts} p
+             LEFT JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = %s
+             LEFT JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.ID
+             LEFT JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id AND tt.taxonomy = 'category'
+             LEFT JOIN {$wpdb->terms} t ON t.term_id = tt.term_id
+             WHERE p.post_type = 'post'
+               AND p.post_status IN ('publish','draft')
+               AND p.ID > %d
+               AND (pm.meta_value IS NULL OR pm.meta_value = 'indefinido')
+             GROUP BY p.ID
+             ORDER BY p.ID ASC
+             LIMIT %d",
+            CAC_META_STATUS, $last_id, CAC_SEMANTIC_BATCH
+        ) );
+
+        @set_time_limit( 120 );
+        $last_processed_id = $last_id;
+
+        foreach ( $rows as $row ) {
+            $category = $row->term_names ?: 'Sem categoria';
+            $prompt   = $this->build_niche_check_prompt( $niche, $row->post_title, $category, $row->excerpt ?? '' );
+            $result   = $this->call_geo_ai_cheap( $prompt );
+
+            if ( ! empty( $result ) ) {
+                update_post_meta( (int) $row->ID, '_cac_semantic_suggestion', $result );
+                $processed++;
+            }
+            $last_processed_id = (int) $row->ID;
+        }
+
+        update_option( 'cac_semantic_audit_last_id', $last_processed_id );
+        update_option( 'cac_semantic_audit_processed', (int) get_option( 'cac_semantic_audit_processed', 0 ) + $processed );
+
+        wp_safe_redirect( admin_url( 'admin.php?page=cac-semantic&batch_done=' . $processed ) );
+        exit;
+    }
+
+    public function handle_apply_semantic_suggestions(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Sem permissão.' );
+        check_admin_referer( 'cac_apply_semantic' );
+
+        $raw_ids = isset( $_POST['post_ids'] ) ? (array) $_POST['post_ids'] : [];
+        $post_ids = array_values( array_filter( array_map( 'intval', $raw_ids ), fn( $id ) => $id > 0 ) );
+        $applied = 0;
+
+        foreach ( $post_ids as $post_id ) {
+            $suggestion = get_post_meta( $post_id, '_cac_semantic_suggestion', true );
+            if ( empty( $suggestion ) ) continue;
+            $allowed = [ 'MANTER', 'NOINDEX', 'FUNDIR', 'REVISAR', 'REMOVER' ];
+            if ( ! in_array( strtoupper( $suggestion ), $allowed, true ) ) continue;
+            $status = strtolower( $suggestion );
+            update_post_meta( $post_id, CAC_META_STATUS, $status );
+            delete_post_meta( $post_id, '_cac_semantic_suggestion' );
+            if ( in_array( $status, [ 'noindex', 'remover' ], true ) ) {
+                $this->apply_noindex( $post_id );
+            }
+            $applied++;
+        }
+
+        wp_safe_redirect( admin_url( 'admin.php?page=cac-semantic&applied=' . $applied ) );
+        exit;
+    }
+
+    public function render_semantic_page(): void {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'Sem permissão.', 'content-audit-cleanup' ) );
+        }
+
+        global $wpdb;
+        $ai_available = has_filter( 'cac_ai_cheap_classify' );
+        $last_id      = (int) get_option( 'cac_semantic_audit_last_id', 0 );
+        $total_processed = (int) get_option( 'cac_semantic_audit_processed', 0 );
+
+        $total_indefinido = (int) $wpdb->get_var( $wpdb->prepare(
+            "SELECT COUNT(p.ID)
+             FROM {$wpdb->posts} p
+             LEFT JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = %s
+             WHERE p.post_type = 'post'
+               AND p.post_status IN ('publish','draft')
+               AND (pm.meta_value IS NULL OR pm.meta_value = 'indefinido')",
+            CAC_META_STATUS
+        ) );
+
+        // Posts com sugestão pendente de revisão
+        $pending_review = $wpdb->get_results( $wpdb->prepare(
+            "SELECT p.ID, p.post_title, pm_sug.meta_value AS suggestion,
+                    GROUP_CONCAT(t.name SEPARATOR ', ') AS term_names
+             FROM {$wpdb->posts} p
+             INNER JOIN {$wpdb->postmeta} pm_sug ON pm_sug.post_id = p.ID AND pm_sug.meta_key = '_cac_semantic_suggestion'
+             LEFT JOIN {$wpdb->postmeta} pm_status ON pm_status.post_id = p.ID AND pm_status.meta_key = %s
+             LEFT JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.ID
+             LEFT JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id AND tt.taxonomy = 'category'
+             LEFT JOIN {$wpdb->terms} t ON t.term_id = tt.term_id
+             WHERE p.post_type = 'post'
+               AND (pm_status.meta_value IS NULL OR pm_status.meta_value = 'indefinido')
+             GROUP BY p.ID
+             ORDER BY pm_sug.meta_value ASC, p.ID ASC
+             LIMIT 200",
+            CAC_META_STATUS
+        ) );
+
+        $colors_map = [ 'MANTER' => '#d4f4dd', 'NOINDEX' => '#ffe1c2', 'FUNDIR' => '#fff3cd', 'REVISAR' => '#e2e2ff', 'REMOVER' => '#fddede', 'DUVIDA' => '#eee' ];
+        ?>
+        <div class="wrap">
+            <h1>🤖 Classificação Semântica via IA (Camada 2)</h1>
+
+            <?php if ( ! $ai_available ) : ?>
+                <div class="notice notice-warning"><p>⚠️ O plugin <strong>GEO Método SEO</strong> não está ativo. A Camada 2 requer o GEO para acessar a API da IA. Ative o GEO Método SEO para usar esta funcionalidade.</p></div>
+            <?php else : ?>
+                <div class="notice notice-success is-dismissible"><p>✅ GEO Método SEO detectado — classificação via <code>llama-3.1-8b-instant</code> disponível.</p></div>
+            <?php endif; ?>
+
+            <?php if ( isset( $_GET['batch_done'] ) ) : ?>
+                <div class="notice notice-success"><p>✅ Lote processado: <strong><?php echo (int) $_GET['batch_done']; ?> posts</strong> classificados.</p></div>
+            <?php endif; ?>
+            <?php if ( isset( $_GET['applied'] ) ) : ?>
+                <div class="notice notice-success"><p>✅ <strong><?php echo (int) $_GET['applied']; ?> sugestões</strong> aplicadas ao status de auditoria.</p></div>
+            <?php endif; ?>
+            <?php if ( isset( $_GET['error'] ) && $_GET['error'] === 'no_ai' ) : ?>
+                <div class="notice notice-error"><p>Erro: GEO Método SEO não disponível para processar o lote.</p></div>
+            <?php endif; ?>
+            <?php if ( isset( $_GET['cursor_reset'] ) ) : ?>
+                <div class="notice notice-success"><p>✅ Cursor reiniciado. Próximo lote começa do início.</p></div>
+            <?php endif; ?>
+
+            <table class="form-table" style="max-width:500px;">
+                <tr><th>Posts "indefinido" restantes</th><td><strong><?php echo number_format( $total_indefinido ); ?></strong></td></tr>
+                <tr><th>Posts processados nesta sessão</th><td><strong><?php echo number_format( $total_processed ); ?></strong></td></tr>
+                <tr><th>Cursor (último ID processado)</th><td><code><?php echo $last_id; ?></code></td></tr>
+                <tr><th>Sugestões aguardando revisão</th><td><strong><?php echo count( $pending_review ); ?></strong></td></tr>
+                <tr><th>Custo estimado (Groq llama-3.1-8b)</th><td>Gratuito (plano free Groq inclui 14.400 req/dia)</td></tr>
+            </table>
+
+            <?php if ( $ai_available && $total_indefinido > 0 ) : ?>
+            <form method="post" action="<?php echo esc_url( admin_url('admin-post.php') ); ?>" style="margin:15px 0;">
+                <?php wp_nonce_field( 'cac_run_semantic_batch' ); ?>
+                <input type="hidden" name="action" value="cac_run_semantic_batch">
+                <button type="submit" class="button button-primary">▶ Processar próximos <?php echo CAC_SEMANTIC_BATCH; ?> posts</button>
+                <span class="description" style="margin-left:10px;">~<?php echo CAC_SEMANTIC_BATCH; ?> chamadas à API Groq (~5-15 segundos)</span>
+            </form>
+            <?php if ( $last_id > 0 ) : ?>
+            <form method="post" action="<?php echo esc_url( admin_url('admin-post.php') ); ?>" style="display:inline-block;">
+                <?php wp_nonce_field( 'cac_run_semantic_batch' ); ?>
+                <input type="hidden" name="action" value="cac_run_semantic_batch">
+                <input type="hidden" name="reset_cursor" value="1">
+                <button type="submit" class="button button-secondary" onclick="return confirm('Reiniciar do começo?');">🔄 Reiniciar cursor</button>
+            </form>
+            <?php endif; ?>
+            <?php endif; ?>
+
+            <?php if ( ! empty( $pending_review ) ) : ?>
+            <h2 style="margin-top:30px;">Sugestões para Revisão (<?php echo count( $pending_review ); ?> posts)</h2>
+            <p class="description">Estas sugestões <strong>não foram aplicadas</strong>. Selecione os posts que você quer aprovar e clique em "Aplicar selecionados".</p>
+
+            <form method="post" action="<?php echo esc_url( admin_url('admin-post.php') ); ?>">
+                <?php wp_nonce_field( 'cac_apply_semantic' ); ?>
+                <input type="hidden" name="action" value="cac_apply_semantic">
+
+                <table class="widefat">
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" id="cac_select_all" onclick="document.querySelectorAll('.cac-sem-cb').forEach(c=>c.checked=this.checked)"></th>
+                            <th>Post</th><th>Categoria</th><th>Sugestão da IA</th><th>Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ( $pending_review as $row ) :
+                        $sug = strtoupper( $row->suggestion ?? 'DUVIDA' );
+                        $bg  = $colors_map[ $sug ] ?? '#eee';
+                    ?>
+                        <tr>
+                            <td><input type="checkbox" class="cac-sem-cb" name="post_ids[]" value="<?php echo (int) $row->ID; ?>"></td>
+                            <td><a href="<?php echo esc_url( get_edit_post_link( $row->ID ) ); ?>" target="_blank"><?php echo esc_html( $row->post_title ); ?></a></td>
+                            <td><?php echo esc_html( $row->term_names ?: '—' ); ?></td>
+                            <td><span style="padding:2px 8px;border-radius:8px;font-weight:bold;background:<?php echo esc_attr( $bg ); ?>"><?php echo esc_html( $sug ); ?></span></td>
+                            <td style="font-size:11px;">
+                                <a href="<?php echo esc_url( get_edit_post_link( $row->ID ) ); ?>" target="_blank">Revisar post</a>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+
+                <p style="margin-top:10px;">
+                    <button type="submit" class="button button-primary">✅ Aplicar sugestões selecionadas ao status de auditoria</button>
+                </p>
+            </form>
+            <?php endif; ?>
+        </div>
+        <?php
     }
 
     /* ─────────────────────── COLUNA NA LISTA DE POSTS ─────────────── */

@@ -179,6 +179,27 @@ class ContentUpdater {
 
         $new_content = $this->restore_media_blocks( $new_content, $original_media_blocks );
 
+        // Segurança: nunca publicar se imagens foram perdidas após tentativa de restauração.
+        $img_before = preg_match_all( '/<img[\s>]/i', $content );
+        $img_after  = preg_match_all( '/<img[\s>]/i', $new_content );
+        if ( $img_before > 0 && $img_after < $img_before ) {
+            $this->append_rewrite_log( $post->ID, [
+                'prompt_version'    => self::PROMPT_VERSION,
+                'provider'          => $provider,
+                'model'             => $model,
+                'validation_passed' => false,
+                'validation_errors' => [ "image_loss: {$img_before} imgs no original, {$img_after} após restauração" ],
+                'char_count_before' => strlen( $content ),
+                'char_count_after'  => strlen( $new_content ),
+            ] );
+            LogService::log(
+                'error',
+                "ContentUpdater: post #{$post->ID} BLOQUEADO — {$img_before} imagens no original, {$img_after} após restauração. Post mantido intacto.",
+                $post->ID
+            );
+            return false;
+        }
+
         \GeoMetodoSEO\Publisher\GeoMetodoSEO_Publisher::update_post( [
             'ID'           => $post->ID,
             'post_content' => $new_content,
@@ -274,32 +295,48 @@ class ContentUpdater {
 
     /**
      * Reinsere as imagens originais no conteúdo reescrito sem mudar URLs/IDs.
+     * Lógica aditiva: verifica cada imagem original individualmente pelo src —
+     * só reinserindo as que a IA removeu, sem duplicar as que ela preservou.
      */
     private function restore_media_blocks( string $new_content, array $media_blocks ): string {
         if ( empty( $media_blocks ) ) return $new_content;
 
-        // Se a IA já preservou imagens, não duplica.
-        if ( preg_match('/<img\s/i', $new_content) || strpos($new_content, '<!-- wp:image') !== false ) {
-            return $new_content;
+        // Lógica aditiva: verifica cada bloco pelo seu src único.
+        $missing_blocks = [];
+        foreach ( $media_blocks as $block ) {
+            if ( preg_match('/src=["\']([^"\']+)["\']/', $block, $m) ) {
+                // Só reinsere se este src específico está ausente no novo conteúdo.
+                if ( strpos( $new_content, $m[1] ) === false ) {
+                    $missing_blocks[] = $block;
+                }
+            } else {
+                // Bloco Gutenberg sem src visível: reinsere se o bloco completo está ausente.
+                if ( strpos( $new_content, $block ) === false ) {
+                    $missing_blocks[] = $block;
+                }
+            }
         }
 
+        if ( empty( $missing_blocks ) ) return $new_content;
+
+        // Distribui blocos ausentes após H2s ou prepend se não houver H2.
         $parts = preg_split('/(<h2[^>]*>.*?<\/h2>)/is', $new_content, -1, PREG_SPLIT_DELIM_CAPTURE);
         if ( ! is_array($parts) || count($parts) < 3 ) {
-            return implode("\n\n", $media_blocks) . "\n\n" . $new_content;
+            return implode("\n\n", $missing_blocks) . "\n\n" . $new_content;
         }
 
         $out = '';
         $media_index = 0;
-        foreach ( $parts as $idx => $part ) {
+        foreach ( $parts as $part ) {
             $out .= $part;
-            if ( preg_match('/^<h2/i', $part) && isset($media_blocks[$media_index]) ) {
-                $out .= "\n\n" . $media_blocks[$media_index] . "\n\n";
+            if ( preg_match('/^<h2/i', $part) && isset($missing_blocks[$media_index]) ) {
+                $out .= "\n\n" . $missing_blocks[$media_index] . "\n\n";
                 $media_index++;
             }
         }
 
-        while ( isset($media_blocks[$media_index]) ) {
-            $out .= "\n\n" . $media_blocks[$media_index];
+        while ( isset($missing_blocks[$media_index]) ) {
+            $out .= "\n\n" . $missing_blocks[$media_index];
             $media_index++;
         }
 

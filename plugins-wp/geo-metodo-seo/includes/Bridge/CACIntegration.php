@@ -31,6 +31,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
+use GeoMetodoSEO\Config\ConfigManager;
 use GeoMetodoSEO\Services\ContentUpdater;
 use GeoMetodoSEO\Services\LogService;
 
@@ -43,6 +44,51 @@ class CACIntegration {
     public static function register_hooks(): void {
         add_action( 'cac_send_post_to_geo_metodo',     array( __CLASS__, 'queue_rewrite' ), 10, 1 );
         add_action( self::CRON_HOOK,                    array( __CLASS__, 'process_rewrite' ), 10, 1 );
+        // Expõe classificação semântica barata para o CAC (Camada 2).
+        add_filter( 'cac_ai_cheap_classify',            array( __CLASS__, 'cheap_classify' ), 10, 2 );
+    }
+
+    /**
+     * Classificação semântica de post via modelo rápido (Groq llama-3.1-8b-instant).
+     * Retorna uma única palavra: MANTER | NOINDEX | FUNDIR | REVISAR | REMOVER | DUVIDA.
+     * Chamado via apply_filters('cac_ai_cheap_classify', '', $prompt).
+     *
+     * @param string $default Valor padrão (string vazia se GEO não disponível).
+     * @param string $prompt  Prompt de classificação montado pelo CAC.
+     */
+    public static function cheap_classify( string $default, string $prompt ): string {
+        $api_key = ConfigManager::get( 'groq_api_key' );
+        if ( empty( $api_key ) ) {
+            return $default;
+        }
+
+        $response = wp_remote_post( 'https://api.groq.com/openai/v1/chat/completions', [
+            'timeout' => 20,
+            'headers' => [
+                'Authorization' => 'Bearer ' . $api_key,
+                'Content-Type'  => 'application/json',
+            ],
+            'body' => wp_json_encode( [
+                'model'       => 'llama-3.1-8b-instant',
+                'messages'    => [ [ 'role' => 'user', 'content' => $prompt ] ],
+                'max_tokens'  => 8,
+                'temperature' => 0.1,
+                'stream'      => false,
+            ] ),
+        ] );
+
+        if ( is_wp_error( $response ) ) return $default;
+        if ( (int) wp_remote_retrieve_response_code( $response ) !== 200 ) return $default;
+
+        $body    = json_decode( wp_remote_retrieve_body( $response ), true );
+        $content = trim( $body['choices'][0]['message']['content'] ?? '' );
+
+        // Extrai apenas a primeira palavra em maiúsculas (a classificação)
+        if ( preg_match('/\b(MANTER|NOINDEX|FUNDIR|REVISAR|REMOVER|DUVIDA)\b/i', $content, $m) ) {
+            return strtoupper( $m[1] );
+        }
+
+        return $default;
     }
 
     /**
