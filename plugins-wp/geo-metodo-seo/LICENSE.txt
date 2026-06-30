@@ -1,0 +1,243 @@
+================================================================================
+LICENÇA COMERCIAL — GEO MÉTODO SEO
+================================================================================
+
+Plugin: GEO Método SEO — Plataforma Editorial com IA para WordPress
+Versão: 1.0.0
+Autor: Alison Jean
+Empresa: aiconteudo.com.br
+E-mail: suporte@aiconteudo.com.br
+Site: https://aiconteudo.com.br
+
+Copyright © 2026 Alison Jean / aiconteudo.com.br
+Todos os direitos reservados.
+
+================================================================================
+1. DEFINIÇÕES
+================================================================================
+
+"Plugin" refere-se ao software GEO Método SEO em todas as suas versões,
+incluindo código-fonte, recursos, documentação e materiais relacionados.
+
+"Licença" refere-se a este documento e aos termos nele descritos.
+
+"Licenciado" refere-se à pessoa física ou jurídica que adquiriu uma chave
+de licença válida em aiconteudo.com.br.
+
+"Site Autorizado" refere-se ao domínio (ou domínios) registrados na chave
+de licença do Licenciado.
+
+"Uso Permitido" refere-se às atividades autorizadas conforme o plano de
+licença adquirido (Basic, Pro, Agency).
+
+================================================================================
+2. CONCESSÃO DE LICENÇA
+================================================================================
+
+Sujeito ao pagamento e aos termos desta Licença, o Licenciante concede ao
+Licenciado uma licença não-exclusiva, não-transferível e revogável para:
+
+   a) INSTALAR o plugin no(s) Site(s) Autorizado(s) conforme o plano:
+      - Plano Basic: 1 site
+      - Plano Pro: até 3 sites
+      - Plano Agency: sites ilimitados (uso comercial próprio)
+
+   b) USAR o plugin para geração de conteúdo em seus próprios sites
+      ou em sites de clientes (Plano Agency).
+
+   c) MODIFICAR o código para uso interno (sem redistribuição).
+
+   d) RECEBER atualizações conforme o plano contratado durante o período
+      de assinatura ativa.
+
+================================================================================
+3. RESTRIÇÕES
+================================================================================
+
+O Licenciado NÃO PODE:
+
+   ❌ Revender, sublicenciar, transferir ou redistribuir o plugin
+   ❌ Disponibilizar o plugin para download público (incluindo torrents)
+   ❌ Remover, alterar ou ocultar avisos de copyright
+   ❌ Realizar engenharia reversa para criar produto concorrente
+   ❌ Usar o plugin em mais sites do que o plano permite
+   ❌ Compartilhar a chave de licença com terceiros
+   ❌ Usar o plugin para gerar conteúdo ilegal, ofensivo, discriminatório,
+      enganoso ou que viole direitos de terceiros
+
+================================================================================
+4. PROPRIEDADE INTELECTUAL
+================================================================================
+
+O Plugin e todos os seus componentes são de propriedade exclusiva de
+Alison Jean / aiconteudo.com.br e estão protegidos por leis de direitos
+autorais do Brasil e tratados internacionais.
+
+Esta Licença NÃO transfere a propriedade do Plugin ao Licenciado.
+
+Conteúdo gerado pelo plugin (artigos, imagens, etc):
+   ✅ Pertence ao Licenciado
+   ✅ Pode ser usado, modificado e monetizado livremente
+   ✅ Não está sujeito a royalties
+
+================================================================================
+5. SISTEMA DE LICENCIAMENTO
+================================================================================
+
+O plugin contém um sistema de validação de licença que:
+   - Verifica periodicamente a validade da chave junto ao servidor de licenças
+   - Pode desativar funcionalidades premium se a licença expirar
+   - NÃO transmite dados pessoais ou conteúdo do usuário
+   - NÃO contém spyware, malware ou backdoor
+
+Em caso de expiração da licença:
+   ✅ Posts já gerados continuam funcionando normalmente
+   ✅ Plugin continua instalado e operacional
+   ⚠️ Novas gerações via Autopilot podem ser limitadas
+   ⚠️ Atualizações automáticas suspendidas
+
+================================================================================
+6. SUPORTE E ATUALIZAÇÕES
+================================================================================
+
+   Plano Basic:
+      - Suporte por e-mail: 48-72h
+      - Atualizações: 1 ano
+
+   Plano Pro:
+      - Suporte por e-mail: 24h
+      - Atualizações: 1 ano
+      - Acesso ao grupo VIP no Telegram
+
+   Plano Agency:
+      - Suporte prioritário: 4-8h
+      - Atualizações vitalícias
+      - Acesso ao grupo VIP no Telegram
+      - Suporte por videochamada (mensal)
+
+================================================================================
+7. GARANTIA E RESPONSABILIDADE
+================================================================================
+
+O Plugin é fornecido "COMO ESTÁ", sem garantias expressas ou implícitas
+de qualquer tipo, incluindo mas não limitado a:
+
+   - Garantias de comercialização
+   - Adequação a um propósito específico
+   - Não-infração de direitos de terceiros
+   - Operação ininterrupta ou livre de erros
+
+LIMITAÇÃO DE RESPONSABILIDADE:
+
+Em nenhum caso o Licenciante será responsável por:
+
+   - Danos indiretos, incidentais, especiais ou consequenciais
+   - Perda de receita, lucros ou dados
+   - Custos de aquisição de bens ou serviços substitutos
+   - Conteúdo gerado pelo plugin (responsabilidade do Licenciado)
+   - Falhas em APIs de terceiros (OpenAI, Fal.ai, etc)
+
+A responsabilidade total do Licenciante é limitada ao valor pago pela
+licença nos últimos 12 meses.
+
+================================================================================
+8. DEPENDÊNCIAS DE TERCEIROS
+================================================================================
+
+O Plugin se integra com APIs externas que possuem seus próprios termos:
+
+   - OpenAI (https://openai.com/policies)
+   - Anthropic Claude (https://anthropic.com/legal)
+   - Google Gemini (https://ai.google.dev/terms)
+   - Groq (https://groq.com/terms)
+   - Perplexity (https://perplexity.ai/legal)
+   - Fal.ai (https://fal.ai/terms)
+   - Replicate (https://replicate.com/terms)
+   - Naga.ac (https://naga.ac/terms)
+   - HuggingFace (https://huggingface.co/terms)
+   - Unsplash, Pexels, Pixabay (termos de cada serviço)
+
+O Licenciado é responsável por:
+   ✅ Possuir contas válidas nos providers utilizados
+   ✅ Pagar pelo uso conforme tabela de preços de cada API
+   ✅ Cumprir os termos de uso de cada provider
+   ✅ Não usar APIs para conteúdo proibido por cada provider
+
+================================================================================
+9. PRIVACIDADE E DADOS
+================================================================================
+
+O Plugin:
+   ✅ NÃO coleta dados pessoais do Licenciado ou visitantes
+   ✅ NÃO envia conteúdo gerado para servidores do Licenciante
+   ✅ APENAS valida a chave de licença em aiconteudo.com.br
+   ✅ Logs ficam armazenados localmente no banco do Licenciado
+
+Conteúdo enviado para APIs de terceiros (OpenAI, Fal.ai, etc) está sujeito
+às políticas de privacidade de cada provider.
+
+================================================================================
+10. RESCISÃO
+================================================================================
+
+Esta Licença pode ser rescindida:
+
+   a) Pelo Licenciado: a qualquer momento, removendo o plugin e
+      cancelando a assinatura.
+
+   b) Pelo Licenciante: em caso de violação dos termos por parte do
+      Licenciado, com efeito imediato.
+
+   c) Por expiração: ao fim do período contratado, se não renovado.
+
+Em caso de rescisão por violação:
+   - Licenciado deve cessar todo uso do Plugin
+   - Apagar todas as cópias instaladas
+   - Não tem direito a reembolso
+
+================================================================================
+11. POLÍTICA DE REEMBOLSO
+================================================================================
+
+   - 7 dias de garantia incondicional
+   - Após 7 dias: reembolso apenas em caso de defeito técnico
+     comprovado e não corrigível
+   - Compras consumidas (créditos de IA já usados): sem reembolso
+
+================================================================================
+12. LEI APLICÁVEL E FORO
+================================================================================
+
+Esta Licença é regida pelas leis da República Federativa do Brasil.
+
+Qualquer disputa será resolvida no foro da comarca onde o Licenciante
+está estabelecido, com expressa renúncia a qualquer outro, por mais
+privilegiado que seja.
+
+================================================================================
+13. CONTATO
+================================================================================
+
+Para questões sobre esta licença:
+
+   E-mail: suporte@aiconteudo.com.br
+   Site: https://aiconteudo.com.br
+   WhatsApp: disponível para clientes Pro e Agency
+
+================================================================================
+14. ACEITAÇÃO
+================================================================================
+
+Ao instalar, ativar ou utilizar este Plugin, o Licenciado declara que:
+
+   ✅ Leu integralmente esta Licença
+   ✅ Entendeu todos os termos
+   ✅ Concorda em cumpri-los
+   ✅ Tem capacidade legal para aceitar este contrato
+
+================================================================================
+                              FIM DA LICENÇA
+================================================================================
+
+Última atualização: 12 de maio de 2026
+Versão da licença: 1.0

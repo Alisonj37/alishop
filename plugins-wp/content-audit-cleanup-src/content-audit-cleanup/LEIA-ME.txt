@@ -1,0 +1,105 @@
+CONTENT AUDIT & CLEANUP (UNIVERSAL) v2.0 — instruções rápidas
+================================================================
+
+NOVIDADES DA V2.0
+-------------------
+- Funciona em QUALQUER nicho: cada instalação tem sua própria tela de
+  Configurações onde você define as palavras-chave de noindex/remover/
+  fundir/revisar específicas daquele site.
+- Detecção automática de posts DESATUALIZADOS (configurável em meses sem
+  edição) — roda diariamente via cron e também sob demanda.
+- Verificação de SITEMAP/LINKS DE STAGING: escaneia posts, páginas e
+  widgets procurando domínios temporários (stackstaging.com, .local,
+  localhost, kinsta.cloud, wpenginepowered.com, etc).
+- Ação "Enviar para reescrita (GEO Método SEO)": marca o post e dispara
+  um hook (cac_send_post_to_geo_metodo) pronto pra ser conectado na
+  função real do GEO Método SEO assim que eu tiver acesso ao código dele.
+
+IMPORTANTE — SOBRE A INTEGRAÇÃO COM GEO MÉTODO SEO
+------------------------------------------------------
+Por enquanto, "Enviar para reescrita" apenas MARCA o post e dispara uma
+action do WordPress (cac_send_post_to_geo_metodo) com o ID do post. Isso
+NÃO aciona a reescrita de verdade ainda, porque preciso ver o código-fonte
+do GEO Método SEO pra saber o nome exato da função/endpoint que ele usa
+pra reescrever conteúdo. Assim que você me passar esse arquivo, eu conecto
+de fato, algo como:
+
+    add_action( 'cac_send_post_to_geo_metodo', 'nome_da_funcao_real_do_geo' );
+
+INSTALAÇÃO EM CADA SITE
+--------------------------
+Este plugin precisa ser instalado em CADA site separadamente (GEANews,
+AliShop, YTUG, geometodo.ia.br, etc). Depois de instalar, vá em
+Configurações e defina as palavras-chave daquele nicho específico — usei
+templates rápidos pra acelerar (Marketing/SEO, Notícias, Afiliados,
+Receitas, Genérico).
+
+CONTENT AUDIT & CLEANUP — instruções v1.0 (ainda válidas) abaixo
+================================================
+
+O QUE ESSE PLUGIN FAZ
+----------------------
+Cria uma tela em "Auditoria de Conteúdo" no menu lateral do WordPress.
+Lá você pode:
+
+1. Rodar uma auditoria automática que classifica seus posts (Manter, Fundir,
+   Noindex, Remover, Revisar) com base em palavras-chave do título — usando
+   exatamente os critérios da análise de nicho do alisonjean.com.br.
+2. Revisar e corrigir manualmente qualquer classificação.
+3. Selecionar posts e aplicar ações em massa:
+   - Aplicar Noindex (compatível com Rank Math e Yoast, com fallback próprio)
+   - Remover Noindex
+   - Mover para a lixeira (reversível por 30 dias, não é delete permanente)
+   - Marcar status (Manter / Fundir / Revisar)
+
+COMO INSTALAR
+--------------
+1. No painel do WordPress, vá em Plugins > Adicionar Novo > Enviar Plugin.
+2. Envie o arquivo content-audit-cleanup.zip.
+3. Ative o plugin.
+4. No menu lateral, clique em "Auditoria de Conteúdo" (ícone de vassourinha 🧹).
+
+COMO USAR
+----------
+1. Clique em "Rodar auditoria automática" — isso vai escanear todos os posts
+   e marcar automaticamente os que batem com os padrões identificados
+   (ex: "colchão", "fintech", "investimentos", "Charlie Kirk", "X-Men" etc).
+   Os marcados como Noindex e Remover já recebem noindex automaticamente
+   nesse momento — nada é apagado, só tirado de indexação.
+2. Use os filtros (Manter / Fundir / Noindex / Remover / Revisar / Sem
+   classificação) para conferir o resultado.
+3. Corrija manualmente qualquer post que tenha sido mal classificado,
+   selecionando o post e usando a ação em massa "Marcar como: ...".
+4. Quando estiver satisfeito com a triagem, selecione os marcados como
+   "Remover" e use a ação "Mover para lixeira".
+5. Os marcados como "Fundir" precisam de ação manual: você decide qual dos
+   dois posts duplicados vira o definitivo e redireciona o outro (recomenda-se
+   usar um plugin de redirecionamento 301, como o Redirection, apontando a
+   URL antiga pra nova).
+
+IMPORTANTE — SOBRE AS REGRAS AUTOMÁTICAS
+------------------------------------------
+A lista de palavras-chave usada na auditoria automática foi montada com base
+na análise de conteúdo já feita do site (posts sobre adega, colchão, sacola,
+fintech/investimentos, Charlie Kirk, livros de ficção etc). Ela está dentro
+do arquivo content-audit-cleanup.php, no método default_ruleset(). Se quiser
+adicionar mais palavras-chave no futuro, é só editar esse array diretamente
+(ou pedir pra eu gerar uma nova versão do plugin com as regras atualizadas).
+
+A classificação automática é um PONTO DE PARTIDA, não decisão final — sempre
+revise antes de mandar pra lixeira. Itens marcados como "remover" e "noindex"
+já saem de indexação automaticamente no momento da auditoria, mas só vão pra
+lixeira quando você confirmar manualmente pela ação em massa.
+
+COMPATIBILIDADE
+-----------------
+- Funciona com Rank Math (usa o campo nativo rank_math_robots).
+- Funciona com Yoast SEO (usa o campo nativo _yoast_wpseo_meta-robots-noindex).
+- Se você não tiver nenhum plugin de SEO ativo, o noindex é aplicado via tag
+  <meta name="robots" content="noindex, follow"> direto no <head>.
+
+SEGURANÇA
+----------
+- Todas as ações exigem permissão de administrador (manage_options).
+- "Mover para lixeira" é reversível por padrão do WordPress (30 dias).
+- Nenhuma ação deleta permanentemente nada.
