@@ -594,6 +594,12 @@ class Content_Audit_Cleanup {
             $args['meta_query'] = array( array( 'key' => CAC_META_NEEDS_UPDATE, 'value' => '1' ) );
         } elseif ( $filter === 'indefinido' ) {
             $args['meta_query'] = array( array( 'key' => CAC_META_STATUS, 'compare' => 'NOT EXISTS' ) );
+        } elseif ( $filter === 'geo_pending' ) {
+            $args['meta_query'] = array( array( 'key' => CAC_META_GEO_STATUS, 'value' => 'pending' ) );
+        } elseif ( $filter === 'geo_done' ) {
+            $args['meta_query'] = array( array( 'key' => CAC_META_GEO_STATUS, 'value' => 'done' ) );
+        } elseif ( $filter === 'geo_failed' ) {
+            $args['meta_query'] = array( array( 'key' => CAC_META_GEO_STATUS, 'value' => 'failed' ) );
         } elseif ( $filter !== 'all' ) {
             $args['meta_query'] = array( array( 'key' => CAC_META_STATUS, 'value' => $filter ) );
         }
@@ -637,19 +643,33 @@ class Content_Audit_Cleanup {
                 <strong>Filtrar:</strong>
                 <?php
                 $filters = array(
-                    'all'             => 'Todos',
-                    'manter'          => 'Manter (' . (int)$counts['manter'] . ')',
-                    'fundir'          => 'Fundir (' . (int)$counts['fundir'] . ')',
-                    'noindex'         => 'Noindex (' . (int)$counts['noindex'] . ')',
-                    'remover'         => 'Remover (' . (int)$counts['remover'] . ')',
-                    'revisar'         => 'Revisar (' . (int)$counts['revisar'] . ')',
-                    'indefinido'      => 'Indefinido (' . (int)$counts['indefinido'] . ')',
+                    'all'               => 'Todos',
+                    'manter'            => 'Manter (' . (int)$counts['manter'] . ')',
+                    'fundir'            => 'Fundir (' . (int)$counts['fundir'] . ')',
+                    'noindex'           => 'Noindex (' . (int)$counts['noindex'] . ')',
+                    'remover'           => 'Remover (' . (int)$counts['remover'] . ')',
+                    'revisar'           => 'Revisar (' . (int)$counts['revisar'] . ')',
+                    'indefinido'        => 'Indefinido (' . (int)$counts['indefinido'] . ')',
                     'precisa_atualizar' => '📅 Desatualizados (' . (int)$counts['precisa_atualizar'] . ')',
                 );
                 foreach ( $filters as $key => $label ) {
                     $active = $filter === $key ? 'button-primary' : '';
                     $url    = admin_url( 'admin.php?page=content-audit-cleanup&cac_filter=' . $key );
                     echo '<a class="button ' . esc_attr( $active ) . '" href="' . esc_url( $url ) . '">' . esc_html( $label ) . '</a> ';
+                }
+                // Filtros GEO Método SEO
+                $geo_filters = array(
+                    'geo_pending' => '⏳ GEO: aguardando (' . (int)($counts['geo_pending'] ?? 0) . ')',
+                    'geo_done'    => '✅ GEO: reescritos (' . (int)($counts['geo_done'] ?? 0) . ')',
+                    'geo_failed'  => '❌ GEO: falhou (' . (int)($counts['geo_failed'] ?? 0) . ')',
+                );
+                if ( array_sum( array_values( $geo_filters ) ) > 0 || in_array( $filter, array_keys( $geo_filters ), true ) ) {
+                    echo '<span style="margin:0 6px;color:#999;">|</span>';
+                    foreach ( $geo_filters as $key => $label ) {
+                        $active = $filter === $key ? 'button-primary' : '';
+                        $url    = admin_url( 'admin.php?page=content-audit-cleanup&cac_filter=' . $key );
+                        echo '<a class="button ' . esc_attr( $active ) . '" href="' . esc_url( $url ) . '">' . esc_html( $label ) . '</a> ';
+                    }
                 }
                 ?>
             </div>
@@ -700,8 +720,14 @@ class Content_Audit_Cleanup {
                                     <?php if ( $sent_to_geo ) : ?>
                                         <?php if ( $geo_status === 'pending' ) : ?>
                                             <span class="cac-badge-pending">⏳ reescrita aguardando</span>
-                                        <?php elseif ( $geo_status === 'done' ) : ?>
+                                        <?php elseif ( $geo_status === 'done' ) :
+                                            $suggested_title = get_post_meta( $post_id, '_geo_suggested_title', true );
+                                        ?>
                                             <span class="cac-badge-done">✅ reescrito pelo GEO</span>
+                                            <?php if ( $suggested_title ) : ?>
+                                                <br><span style="font-size:10px;color:#555;">💡 Título sugerido: <em><?php echo esc_html( mb_substr( $suggested_title, 0, 60 ) ); ?></em>
+                                                <a href="<?php echo esc_url( get_edit_post_link( $post_id ) ); ?>" target="_blank" style="font-size:10px;">[revisar]</a></span>
+                                            <?php endif; ?>
                                         <?php elseif ( $geo_status === 'failed' ) : ?>
                                             <span class="cac-badge-failed">❌ reescrita falhou</span>
                                         <?php else : ?>
@@ -742,7 +768,7 @@ class Content_Audit_Cleanup {
 
     private function get_status_counts() {
         global $wpdb;
-        $counts  = array( 'manter'=>0,'fundir'=>0,'noindex'=>0,'remover'=>0,'revisar'=>0,'indefinido'=>0,'precisa_atualizar'=>0 );
+        $counts  = array( 'manter'=>0,'fundir'=>0,'noindex'=>0,'remover'=>0,'revisar'=>0,'indefinido'=>0,'precisa_atualizar'=>0,'geo_pending'=>0,'geo_done'=>0,'geo_failed'=>0 );
 
         $results = $wpdb->get_results( $wpdb->prepare(
             "SELECT pm.meta_value, COUNT(*) c
@@ -776,6 +802,21 @@ class Content_Audit_Cleanup {
                AND p.post_type = 'post' AND p.post_status != 'trash'",
             CAC_META_NEEDS_UPDATE
         ) );
+
+        // Contagens por status GEO
+        $geo_results = $wpdb->get_results( $wpdb->prepare(
+            "SELECT pm.meta_value, COUNT(*) c
+             FROM {$wpdb->postmeta} pm
+             INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+             WHERE pm.meta_key = %s
+               AND pm.meta_value IN ('pending','done','failed')
+               AND p.post_type = 'post' AND p.post_status != 'trash'
+             GROUP BY pm.meta_value",
+            CAC_META_GEO_STATUS
+        ) );
+        foreach ( $geo_results as $row ) {
+            $counts[ 'geo_' . $row->meta_value ] = (int) $row->c;
+        }
 
         return $counts;
     }
@@ -1055,40 +1096,52 @@ class Content_Audit_Cleanup {
     }
 
     /**
-     * Simula a substituição de domínio sem escrever no BD.
-     * Retorna lista de posts que seriam afetados.
+     * Conta e amostra posts afetados pelo domínio de staging (sem escrever no BD).
+     * Retorna ['total' => N, 'sample' => [...primeiros 50...], 'production_host' => '...'].
      */
     private function staging_dry_run( string $staging_domain ): array {
         global $wpdb;
         $production_host = wp_parse_url( home_url(), PHP_URL_HOST );
-        $changes = [];
+        $like            = '%' . $wpdb->esc_like( $staging_domain ) . '%';
 
-        $rows = $wpdb->get_results( $wpdb->prepare(
+        $total = (int) $wpdb->get_var( $wpdb->prepare(
+            "SELECT COUNT(*) FROM {$wpdb->posts}
+             WHERE post_type IN ('post','page')
+               AND post_status IN ('publish','draft','pending')
+               AND post_content LIKE %s",
+            $like
+        ) );
+
+        // Amostra para exibição (primeiros 50)
+        $sample_rows = $wpdb->get_results( $wpdb->prepare(
             "SELECT ID, post_title, post_content
              FROM {$wpdb->posts}
              WHERE post_type IN ('post','page')
                AND post_status IN ('publish','draft','pending')
                AND post_content LIKE %s
-             LIMIT 300",
-            '%' . $wpdb->esc_like( $staging_domain ) . '%'
+             ORDER BY ID ASC LIMIT 50",
+            $like
         ) );
 
-        foreach ( $rows as $row ) {
-            $count = substr_count( $row->post_content, $staging_domain );
-            if ( $count < 1 ) continue;
-            // Pega a primeira URL de staging encontrada como exemplo
-            preg_match( '/https?:\/\/[^\s"\'<>]*' . preg_quote( $staging_domain, '/' ) . '[^\s"\'<>]*/i', $row->post_content, $sample );
-            $changes[] = [
-                'post_id'    => (int) $row->ID,
-                'post_title' => $row->post_title,
-                'url_count'  => $count,
-                'sample_url' => $sample[0] ?? $staging_domain,
-                'would_become' => preg_replace( '/(https?:\/\/)' . preg_quote( $staging_domain, '/' ) . '/i', '$1' . $production_host, $sample[0] ?? $staging_domain ),
-                'edit_link'  => get_edit_post_link( (int) $row->ID, '' ),
+        $sample = [];
+        foreach ( $sample_rows as $row ) {
+            $url_count = substr_count( $row->post_content, $staging_domain );
+            preg_match( '/https?:\/\/[^\s"\'<>]*' . preg_quote( $staging_domain, '/' ) . '[^\s"\'<>]*/i', $row->post_content, $m );
+            $sample[] = [
+                'post_id'      => (int) $row->ID,
+                'post_title'   => $row->post_title,
+                'url_count'    => $url_count,
+                'sample_url'   => $m[0] ?? $staging_domain,
+                'would_become' => preg_replace(
+                    '/(https?:\/\/)' . preg_quote( $staging_domain, '/' ) . '/i',
+                    '$1' . $production_host,
+                    $m[0] ?? $staging_domain
+                ),
+                'edit_link' => get_edit_post_link( (int) $row->ID, '' ),
             ];
         }
 
-        return $changes;
+        return [ 'total' => $total, 'sample' => $sample, 'production_host' => $production_host ];
     }
 
     public function handle_staging_dry_run(): void {
@@ -1101,9 +1154,10 @@ class Content_Audit_Cleanup {
             exit;
         }
 
-        $changes = $this->staging_dry_run( $staging_domain );
+        $result = $this->staging_dry_run( $staging_domain );
         update_option( 'cac_staging_dry_run_results', [
-            'changes'        => $changes,
+            'total'          => $result['total'],
+            'sample'         => $result['sample'],
             'staging_domain' => $staging_domain,
             'ran_at'         => current_time( 'd/m/Y H:i' ),
         ], false );
@@ -1129,45 +1183,87 @@ class Content_Audit_Cleanup {
             exit;
         }
 
+        @set_time_limit( 300 );
         global $wpdb;
         $production_host = wp_parse_url( home_url(), PHP_URL_HOST );
-        $fixed = 0;
+        $like            = '%' . $wpdb->esc_like( $staging_domain ) . '%';
+        $regex           = '/(https?:\/\/)' . preg_quote( $staging_domain, '/' ) . '/i';
+        $fixed           = 0;
+        $offset          = 0;
+        $batch           = 200;
 
-        foreach ( $dry['changes'] as $item ) {
-            $post_id = (int) $item['post_id'];
-            $post    = get_post( $post_id );
-            if ( ! $post ) continue;
+        // Processa TODOS os posts afetados em batches (sem limite) — não depende do dry run cacheado.
+        do {
+            $rows = $wpdb->get_results( $wpdb->prepare(
+                "SELECT ID, post_content FROM {$wpdb->posts}
+                 WHERE post_type IN ('post','page')
+                   AND post_status IN ('publish','draft','pending')
+                   AND post_content LIKE %s
+                 ORDER BY ID ASC LIMIT %d OFFSET %d",
+                $like, $batch, $offset
+            ) );
 
-            // Backup do conteúdo original (não sobrescreve backup existente)
-            if ( ! get_post_meta( $post_id, CAC_STAGING_META_BACKUP, true ) ) {
-                update_post_meta( $post_id, CAC_STAGING_META_BACKUP, $post->post_content );
+            foreach ( $rows as $row ) {
+                $post_id = (int) $row->ID;
+
+                // Backup do conteúdo original (não sobrescreve backup existente)
+                if ( ! get_post_meta( $post_id, CAC_STAGING_META_BACKUP, true ) ) {
+                    update_post_meta( $post_id, CAC_STAGING_META_BACKUP, $row->post_content );
+                }
+
+                // Substituição segura: apenas o domínio, preserva paths e query strings
+                $new_content = preg_replace( $regex, '$1' . $production_host, $row->post_content );
+
+                if ( $new_content !== null && $new_content !== $row->post_content ) {
+                    $wpdb->update(
+                        $wpdb->posts,
+                        [ 'post_content' => $new_content ],
+                        [ 'ID'           => $post_id ],
+                        [ '%s' ],
+                        [ '%d' ]
+                    );
+                    clean_post_cache( $post_id );
+                    $fixed++;
+                }
             }
 
-            // Substituição segura: apenas o domínio, preserva paths e query strings
-            $new_content = preg_replace(
-                '/(https?:\/\/)' . preg_quote( $staging_domain, '/' ) . '/i',
-                '$1' . $production_host,
-                $post->post_content
-            );
+            $offset += $batch;
+        } while ( count( $rows ) === $batch );
 
-            if ( $new_content !== $post->post_content ) {
-                $wpdb->update(
-                    $wpdb->posts,
-                    [ 'post_content' => $new_content ],
-                    [ 'ID'           => $post_id ],
-                    [ '%s' ],
-                    [ '%d' ]
-                );
-                clean_post_cache( $post_id );
-                $fixed++;
+        // Tentar limpar o cache do sitemap do Rank Math automaticamente
+        $sitemap_flushed = $this->flush_rank_math_sitemap();
+
+        delete_option( 'cac_staging_dry_run_results' );
+
+        $redirect = admin_url( 'admin.php?page=cac-staging&fixed=' . $fixed );
+        if ( $sitemap_flushed ) {
+            $redirect .= '&sitemap_flushed=1';
+        }
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    /**
+     * Tenta limpar o cache do sitemap do Rank Math programaticamente.
+     * Retorna true se conseguiu disparar o flush.
+     */
+    private function flush_rank_math_sitemap(): bool {
+        if ( ! function_exists('rank_math') ) return false;
+
+        // Rank Math armazena o sitemap index como opção e tem hook para flush
+        delete_option( 'rank_math_sitemap_index' );
+        do_action( 'rank_math/sitemap/clear_sitemap' );
+
+        // Tenta via classe direta se disponível
+        if ( class_exists('\RankMath\Sitemap\Sitemap') ) {
+            try {
+                \RankMath\Sitemap\Sitemap::refresh_sitemap_index();
+            } catch ( \Throwable $e ) {
+                // ignora — o delete_option já faz a maior parte
             }
         }
 
-        // Limpa o dry run armazenado após aplicar
-        delete_option( 'cac_staging_dry_run_results' );
-
-        wp_safe_redirect( admin_url( 'admin.php?page=cac-staging&fixed=' . $fixed ) );
-        exit;
+        return true;
     }
 
     public function render_staging_fix_page(): void {
@@ -1187,7 +1283,14 @@ class Content_Audit_Cleanup {
             <h1>🔧 Correção de Links de Staging</h1>
 
             <?php if ( isset( $_GET['fixed'] ) ) : ?>
-                <div class="notice notice-success"><p>✅ <strong><?php echo (int) $_GET['fixed']; ?> post(s)</strong> corrigidos com sucesso. <a href="<?php echo esc_url( admin_url('admin.php?page=cac-sitemap') ); ?>">Execute o scan de sitemap novamente</a> para confirmar.</p></div>
+                <div class="notice notice-success">
+                    <p>✅ <strong><?php echo (int) $_GET['fixed']; ?> post(s)</strong> com links de staging corrigidos no banco de dados.</p>
+                    <?php if ( isset( $_GET['sitemap_flushed'] ) ) : ?>
+                        <p>♻️ Cache do sitemap Rank Math limpo automaticamente. Aguarde alguns minutos para o sitemap ser regenerado, depois <a href="<?php echo esc_url( admin_url('admin.php?page=cac-sitemap') ); ?>">execute o scan novamente</a>.</p>
+                    <?php else : ?>
+                        <p>⚠️ <strong>Ação necessária:</strong> Se o scan ainda mostrar entradas de sitemap com host errado, vá em <a href="<?php echo esc_url( admin_url('admin.php?page=rank-math-sitemap') ); ?>" target="_blank">Rank Math → Sitemap</a> e clique em <strong>"Limpar Cache do Sitemap"</strong> para regenerar as URLs. Depois <a href="<?php echo esc_url( admin_url('admin.php?page=cac-sitemap') ); ?>">execute o scan novamente</a>.</p>
+                    <?php endif; ?>
+                </div>
             <?php endif; ?>
             <?php if ( isset( $_GET['error'] ) ) : ?>
                 <div class="notice notice-error"><p>Erro: <?php echo esc_html( $_GET['error'] === 'no_dry_run' ? 'Execute o Dry Run primeiro antes de aplicar.' : 'Domínio inválido.' ); ?></p></div>
@@ -1232,14 +1335,25 @@ class Content_Audit_Cleanup {
 
             <?php if ( isset( $_GET['dry_run'] ) && ! empty( $dry ) ) : ?>
             <h2 style="margin-top:25px;">Resultado do Dry Run (<?php echo esc_html( $dry['ran_at'] ?? '' ); ?>)</h2>
-            <?php if ( empty( $dry['changes'] ) ) : ?>
-                <div class="notice notice-success"><p>✅ Nenhum post com links de staging no conteúdo.</p></div>
+            <?php
+            $dry_total  = (int) ( $dry['total'] ?? count( $dry['sample'] ?? [] ) );
+            $dry_sample = $dry['sample'] ?? $dry['changes'] ?? [];
+            ?>
+            <?php if ( $dry_total === 0 ) : ?>
+                <div class="notice notice-success"><p>✅ Nenhum post com links de staging no conteúdo. Se o scan ainda mostra resultados, eles são de <strong>sitemap XML</strong> — veja a instrução acima para regenerar o Rank Math.</p></div>
             <?php else : ?>
-                <p>Os seguintes <strong><?php echo count( $dry['changes'] ); ?> posts</strong> seriam alterados:</p>
+                <div class="notice notice-info">
+                    <p><strong><?php echo $dry_total; ?> post(s) no banco de dados</strong> têm links de staging no conteúdo.
+                    <?php if ( $dry_total > 50 ) : ?>
+                        Exibindo os primeiros 50 como amostra abaixo — todos os <?php echo $dry_total; ?> serão corrigidos ao aplicar.
+                    <?php endif; ?>
+                    </p>
+                </div>
+                <?php if ( ! empty( $dry_sample ) ) : ?>
                 <table class="widefat" style="margin-bottom:20px;">
                     <thead><tr><th>Post</th><th>Qtd URLs</th><th>Exemplo de mudança</th></tr></thead>
                     <tbody>
-                    <?php foreach ( array_slice( $dry['changes'], 0, 50 ) as $chg ) : ?>
+                    <?php foreach ( $dry_sample as $chg ) : ?>
                         <tr>
                             <td><a href="<?php echo esc_url( $chg['edit_link'] ); ?>" target="_blank"><?php echo esc_html( $chg['post_title'] ); ?></a></td>
                             <td><?php echo (int) $chg['url_count']; ?></td>
@@ -1248,15 +1362,16 @@ class Content_Audit_Cleanup {
                     <?php endforeach; ?>
                     </tbody>
                 </table>
+                <?php endif; ?>
 
-                <div class="notice notice-warning"><p>⚠️ Confirme antes de aplicar: o conteúdo original de cada post será salvo no meta <code><?php echo CAC_STAGING_META_BACKUP; ?></code> para recuperação manual se necessário.</p></div>
+                <div class="notice notice-warning"><p>⚠️ Antes de aplicar: o conteúdo original de cada post será salvo no meta <code><?php echo CAC_STAGING_META_BACKUP; ?></code> para recuperação manual se necessário.</p></div>
 
                 <form method="post" action="<?php echo esc_url( admin_url('admin-post.php') ); ?>">
                     <?php wp_nonce_field( 'cac_apply_staging_fix' ); ?>
                     <input type="hidden" name="action" value="cac_apply_staging_fix">
                     <input type="hidden" name="staging_domain" value="<?php echo esc_attr( $dry['staging_domain'] ); ?>">
-                    <button type="submit" class="button button-primary" onclick="return confirm('Aplicar correção em <?php echo count( $dry['changes'] ); ?> posts? O conteúdo original será salvo como backup.');">
-                        ✅ Aplicar correção em <?php echo count( $dry['changes'] ); ?> posts
+                    <button type="submit" class="button button-primary" onclick="return confirm('Aplicar correção em TODOS os <?php echo $dry_total; ?> posts? O conteúdo original de cada um será salvo como backup.');">
+                        ✅ Aplicar correção em todos os <?php echo $dry_total; ?> posts
                     </button>
                 </form>
             <?php endif; ?>
