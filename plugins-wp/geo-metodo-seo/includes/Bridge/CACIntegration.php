@@ -147,6 +147,7 @@ class CACIntegration {
             && ! geo_metodo_license_active()
         ) {
             update_post_meta( $post_id, self::META_GEO_STATUS, 'failed' );
+            update_post_meta( $post_id, '_cac_geo_fail_reason', 'Sem licença ativa do GEO Método SEO.' );
             LogService::log(
                 'error',
                 "CAC Bridge: post #{$post_id} — reescrita cancelada: sem licença ativa do GEO Método SEO."
@@ -154,17 +155,44 @@ class CACIntegration {
             return;
         }
 
+        // Verificar que algum provider de IA está configurado antes de tentar
+        $provider = \GeoMetodoSEO\AI\ProviderResolver::for('content_refresher');
+        if ( empty( $provider ) ) {
+            // Se não tem provider específico para reescrita, tenta o padrão global
+            $provider = \GeoMetodoSEO\AI\ProviderResolver::for('article_generation');
+        }
+        if ( empty( $provider ) ) {
+            update_post_meta( $post_id, self::META_GEO_STATUS, 'failed' );
+            update_post_meta( $post_id, '_cac_geo_fail_reason', 'Nenhum provider de IA configurado. Vá em GEO Método SEO → Configurações e configure ao menos uma API key (Groq, OpenAI, etc).' );
+            LogService::log(
+                'error',
+                "CAC Bridge: post #{$post_id} — nenhum provider de IA configurado para reescrita. Configure em GEO → Configurações."
+            );
+            return;
+        }
+
+        if ( ! \GeoMetodoSEO\AI\ProviderResolver::isConfigured( $provider ) ) {
+            update_post_meta( $post_id, self::META_GEO_STATUS, 'failed' );
+            update_post_meta( $post_id, '_cac_geo_fail_reason', "Provider '{$provider}' selecionado mas sem API key. Configure em GEO → Configurações → API Keys." );
+            LogService::log(
+                'error',
+                "CAC Bridge: post #{$post_id} — provider '{$provider}' sem API key configurada."
+            );
+            return;
+        }
+
         $post = get_post( $post_id );
         if ( ! $post ) {
             update_post_meta( $post_id, self::META_GEO_STATUS, 'failed' );
+            update_post_meta( $post_id, '_cac_geo_fail_reason', 'Post não encontrado no banco de dados.' );
             LogService::log( 'error', "CAC Bridge: post #{$post_id} não encontrado para reescrita." );
             return;
         }
 
         LogService::record(
             'bridge', 'info',
-            "CAC Bridge: iniciando reescrita do post #{$post_id} ({$post->post_title})",
-            array( 'action' => 'cac_process_rewrite', 'post_id' => $post_id )
+            "CAC Bridge: iniciando reescrita do post #{$post_id} ({$post->post_title}) via provider '{$provider}'",
+            array( 'action' => 'cac_process_rewrite', 'post_id' => $post_id, 'provider' => $provider )
         );
 
         @set_time_limit( 180 );
@@ -176,20 +204,29 @@ class CACIntegration {
             if ( $result ) {
                 update_post_meta( $post_id, self::META_GEO_STATUS, 'done' );
                 update_post_meta( $post_id, '_cac_geo_rewritten_at', current_time( 'mysql' ) );
+                delete_post_meta( $post_id, '_cac_geo_fail_reason' );
                 LogService::record(
                     'bridge', 'success',
-                    "CAC Bridge: post #{$post_id} reescrito com sucesso pelo GEO Método SEO.",
+                    "CAC Bridge: post #{$post_id} reescrito com sucesso pelo GEO Método SEO via '{$provider}'.",
                     array( 'action' => 'cac_rewrite_done', 'post_id' => $post_id )
                 );
             } else {
                 update_post_meta( $post_id, self::META_GEO_STATUS, 'failed' );
+                $log = get_post_meta( $post_id, '_geo_rewrite_log', true );
+                $last_error = '';
+                if ( is_array( $log ) && ! empty( $log ) ) {
+                    $last = end( $log );
+                    $last_error = implode( ', ', (array) ( $last['validation_errors'] ?? [] ) );
+                }
+                update_post_meta( $post_id, '_cac_geo_fail_reason', $last_error ?: 'ContentUpdater retornou false — veja o log no GEO.' );
                 LogService::log(
                     'error',
-                    "CAC Bridge: ContentUpdater retornou false para post #{$post_id}."
+                    "CAC Bridge: ContentUpdater retornou false para post #{$post_id}. Erros: " . ( $last_error ?: 'desconhecido' )
                 );
             }
         } catch ( \Throwable $e ) {
             update_post_meta( $post_id, self::META_GEO_STATUS, 'failed' );
+            update_post_meta( $post_id, '_cac_geo_fail_reason', 'Exceção: ' . $e->getMessage() );
             LogService::log(
                 'error',
                 "CAC Bridge: exceção ao reescrever post #{$post_id} — " . $e->getMessage()

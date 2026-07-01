@@ -115,10 +115,17 @@ class Content_Audit_Cleanup {
                 <input type="hidden" name="action" value="cac_save_settings">
                 <table class="form-table">
                     <tr>
+                        <th><label for="cac_manter_kw">Palavras-chave: Manter (conteúdo do nicho)</label></th>
+                        <td>
+                            <textarea name="manter_keywords" id="cac_manter_kw" rows="4" cols="70"><?php echo esc_textarea( implode( "\n", (array) ( $keywords['manter'] ?? [] ) ) ); ?></textarea>
+                            <p class="description">Posts cujo título ou conteúdo contenha essas palavras serão marcados como <strong>Manter</strong>. Use as palavras-chave centrais do nicho do site.</p>
+                        </td>
+                    </tr>
+                    <tr>
                         <th><label for="cac_noindex_kw">Palavras-chave: Noindex (fora do nicho)</label></th>
                         <td>
                             <textarea name="noindex_keywords" id="cac_noindex_kw" rows="4" cols="70"><?php echo esc_textarea( implode( "\n", (array) $keywords['noindex'] ) ); ?></textarea>
-                            <p class="description">Uma palavra/expressão por linha. Posts cujo título contenha essas palavras serão marcados como Noindex.</p>
+                            <p class="description">Uma palavra/expressão por linha. Posts cujo título ou conteúdo contenha essas palavras serão marcados como Noindex.</p>
                         </td>
                     </tr>
                     <tr>
@@ -175,14 +182,15 @@ class Content_Audit_Cleanup {
         <script>
         function cacFillTemplate(type) {
             var templates = {
-                marketing: { noindex: "política\nguerra\ntragédia\nassassinato", remover: "política\nassassinato\ntragédia\nguerra", revisar: "inovação genérica\ntecnologia geral", fundir: "" },
-                noticias:  { noindex: "", remover: "boato não confirmado\nfake news", revisar: "", fundir: "" },
-                afiliados: { noindex: "notícias\npolitica\nfutebol", remover: "concorrente direto\nmarca registrada de terceiro", revisar: "produto descontinuado", fundir: "" },
-                receitas:  { noindex: "politica\nnoticias\ntecnologia", remover: "", revisar: "receita sem foto\nreceita sem ingredientes claros", fundir: "" },
-                generico:  { noindex: "", remover: "conteúdo sensível\npolítica\ntragédia", revisar: "", fundir: "" }
+                marketing: { manter: "seo\nmarketing digital\ncopywriting\ntráfego\nconversão\nfunil\nlead\ne-mail marketing\nredes sociais\nconteúdo", noindex: "política\nguerra\ntragédia\nassassinato", remover: "política\nassassinato\ntragédia\nguerra", revisar: "inovação genérica\ntecnologia geral", fundir: "" },
+                noticias:  { manter: "notícia\nreportagem\nentrevista\ncobertura\neditorial", noindex: "", remover: "boato não confirmado\nfake news", revisar: "", fundir: "" },
+                afiliados: { manter: "review\ncomparação\nmelhor\ncupom\noferta\npreço\nproduto\ncomprar\nrecomendação", noindex: "notícias\npolitica\nfutebol", remover: "concorrente direto\nmarca registrada de terceiro", revisar: "produto descontinuado", fundir: "" },
+                receitas:  { manter: "receita\ncomo fazer\ningredientes\nmodo de preparo\nsobremesa\nprato\nculinária\nbolo\nsuco\nsalada", noindex: "politica\nnoticias\ntecnologia", remover: "", revisar: "receita sem foto\nreceita sem ingredientes claros", fundir: "" },
+                generico:  { manter: "", noindex: "", remover: "conteúdo sensível\npolítica\ntragédia", revisar: "", fundir: "" }
             };
             var t = templates[type];
             if (!t) return;
+            document.getElementById('cac_manter_kw').value  = t.manter  || '';
             document.getElementById('cac_noindex_kw').value = t.noindex || '';
             document.getElementById('cac_remover_kw').value = t.remover || '';
             document.getElementById('cac_revisar_kw').value = t.revisar || '';
@@ -194,7 +202,7 @@ class Content_Audit_Cleanup {
     }
 
     private function default_keywords_template() {
-        return array( 'noindex' => array(), 'remover' => array(), 'fundir' => array(), 'revisar' => array() );
+        return array( 'noindex' => array(), 'remover' => array(), 'fundir' => array(), 'revisar' => array(), 'manter' => array() );
     }
 
     public function handle_save_settings() {
@@ -212,6 +220,7 @@ class Content_Audit_Cleanup {
         };
 
         $keywords = array(
+            'manter'  => $parse( 'manter_keywords' ),
             'noindex' => $parse( 'noindex_keywords' ),
             'remover' => $parse( 'remover_keywords' ),
             'fundir'  => $parse( 'fundir_keywords' ),
@@ -688,6 +697,7 @@ class Content_Audit_Cleanup {
                         <option value="mark_fundir">Marcar: Fundir</option>
                         <option value="mark_revisar">Marcar: Revisar categoria</option>
                         <option value="send_to_geo">📤 Enviar para reescrita (GEO Método SEO)</option>
+                        <option value="retry_geo">🔄 Reenviar para GEO (tentar novamente)</option>
                     </select>
                     <button type="submit" class="button button-primary" onclick="return confirm('Confirma aplicar essa ação nos posts selecionados?');">Aplicar</button>
                 </div>
@@ -728,8 +738,13 @@ class Content_Audit_Cleanup {
                                                 <br><span style="font-size:10px;color:#555;">💡 Título sugerido: <em><?php echo esc_html( mb_substr( $suggested_title, 0, 60 ) ); ?></em>
                                                 <a href="<?php echo esc_url( get_edit_post_link( $post_id ) ); ?>" target="_blank" style="font-size:10px;">[revisar]</a></span>
                                             <?php endif; ?>
-                                        <?php elseif ( $geo_status === 'failed' ) : ?>
+                                        <?php elseif ( $geo_status === 'failed' ) :
+                                            $fail_reason = get_post_meta( $post_id, '_cac_geo_fail_reason', true );
+                                        ?>
                                             <span class="cac-badge-failed">❌ reescrita falhou</span>
+                                            <?php if ( $fail_reason ) : ?>
+                                                <br><span style="font-size:10px;color:#a30000;">Motivo: <?php echo esc_html( mb_substr( $fail_reason, 0, 120 ) ); ?></span>
+                                            <?php endif; ?>
                                         <?php else : ?>
                                             <span class="cac-badge-geo">📤 enviado p/ GEO</span>
                                         <?php endif; ?>
@@ -832,9 +847,9 @@ class Content_Audit_Cleanup {
         global $wpdb;
         $rules = get_option( CAC_OPTION_NICHE_KEYWORDS, $this->default_keywords_template() );
 
-        // Pré-compila lookup de keywords → status (prioridade: remover > noindex > fundir > revisar)
+        // Pré-compila lookup de keywords → status (prioridade: remover > noindex > fundir > revisar > manter)
         $kw_map = array();
-        foreach ( array( 'remover', 'noindex', 'fundir', 'revisar' ) as $status ) {
+        foreach ( array( 'remover', 'noindex', 'fundir', 'revisar', 'manter' ) as $status ) {
             foreach ( (array) ( $rules[ $status ] ?? array() ) as $kw ) {
                 $kw = trim( mb_strtolower( $kw ) );
                 if ( $kw !== '' && ! isset( $kw_map[ $kw ] ) ) {
@@ -965,7 +980,7 @@ class Content_Audit_Cleanup {
 
         $allowed_actions = array(
             'apply_noindex', 'remove_noindex', 'trash',
-            'mark_manter', 'mark_fundir', 'mark_revisar', 'send_to_geo',
+            'mark_manter', 'mark_fundir', 'mark_revisar', 'send_to_geo', 'retry_geo',
         );
         if ( ! in_array( $bulk_action, $allowed_actions, true ) ) {
             wp_safe_redirect( admin_url( 'admin.php?page=content-audit-cleanup' ) );
@@ -999,8 +1014,10 @@ class Content_Audit_Cleanup {
                     update_post_meta( $post_id, CAC_META_STATUS, 'revisar' );
                     break;
                 case 'send_to_geo':
+                case 'retry_geo':
                     update_post_meta( $post_id, CAC_META_SENT_TO_GEO, '1' );
                     update_post_meta( $post_id, CAC_META_GEO_STATUS, 'pending' );
+                    delete_post_meta( $post_id, '_cac_geo_fail_reason' );
                     /**
                      * Dispara a integração com o GEO Método SEO.
                      * O hook é implementado em geo-metodo-seo/includes/Bridge/CACIntegration.php.
@@ -1086,12 +1103,40 @@ class Content_Audit_Cleanup {
     private function detect_staging_domains( array $found ): array {
         $production_host = wp_parse_url( home_url(), PHP_URL_HOST );
         $domains = [];
+
+        // Known staging patterns — same as handle_check_sitemap()
+        $patterns = [
+            'stackstaging.com', 'wpengine.com', '.staging.', 'staging.',
+            'localhost', '.local', 'tempurl.host', 'cloudwaysapps.com',
+            'wpenginepowered.com', 'kinsta.cloud', 'flywheelsites.com',
+            'myftpupload.com', 'azurewebsites.net', 'instawp.xyz',
+        ];
+
         foreach ( $found as $item ) {
-            $host = wp_parse_url( $item['url'], PHP_URL_HOST );
+            $url = $item['url'] ?? '';
+            // Try parsing host from full URL first
+            $host = wp_parse_url( $url, PHP_URL_HOST );
             if ( $host && $host !== $production_host && ! in_array( $host, $domains, true ) ) {
                 $domains[] = $host;
+                continue;
+            }
+            // Fallback: extract staging pattern from the URL string
+            foreach ( $patterns as $pat ) {
+                if ( stripos( $url, $pat ) !== false ) {
+                    // Try to extract the full domain from the URL
+                    if ( preg_match( '/([a-zA-Z0-9._-]+\.' . preg_quote( $pat, '/' ) . ')/', $url, $m ) ) {
+                        $d = $m[1];
+                    } else {
+                        $d = $pat;
+                    }
+                    if ( $d !== $production_host && ! in_array( $d, $domains, true ) ) {
+                        $domains[] = $d;
+                    }
+                    break;
+                }
             }
         }
+
         return $domains;
     }
 
@@ -1149,7 +1194,7 @@ class Content_Audit_Cleanup {
         check_admin_referer( 'cac_staging_dry_run' );
 
         $staging_domain = sanitize_text_field( $_POST['staging_domain'] ?? '' );
-        if ( empty( $staging_domain ) || ! preg_match( '/^[a-zA-Z0-9._-]+$/', $staging_domain ) ) {
+        if ( empty( $staging_domain ) || ! preg_match( '/^[a-zA-Z0-9._:-]+$/', $staging_domain ) ) {
             wp_safe_redirect( admin_url( 'admin.php?page=cac-staging&error=invalid_domain' ) );
             exit;
         }
@@ -1171,7 +1216,7 @@ class Content_Audit_Cleanup {
         check_admin_referer( 'cac_apply_staging_fix' );
 
         $staging_domain = sanitize_text_field( $_POST['staging_domain'] ?? '' );
-        if ( empty( $staging_domain ) || ! preg_match( '/^[a-zA-Z0-9._-]+$/', $staging_domain ) ) {
+        if ( empty( $staging_domain ) || ! preg_match( '/^[a-zA-Z0-9._:-]+$/', $staging_domain ) ) {
             wp_safe_redirect( admin_url( 'admin.php?page=cac-staging&error=invalid_domain' ) );
             exit;
         }
@@ -1320,18 +1365,19 @@ class Content_Audit_Cleanup {
             </div>
             <?php endif; ?>
 
-            <?php if ( $post_count > 0 && ! empty( $domains ) ) : ?>
             <h2 style="margin-top:25px;">Passo 1: Dry Run — ver o que seria alterado</h2>
-            <p>Domínio de staging detectado: <code><?php echo esc_html( implode( ', ', $domains ) ); ?></code></p>
-            <p>O dry run mostra exatamente quais posts seriam alterados e como, <strong>sem escrever nada no banco</strong>.</p>
+            <?php if ( ! empty( $domains ) ) : ?>
+            <p>Domínio(s) de staging detectado(s): <code><?php echo esc_html( implode( ', ', $domains ) ); ?></code></p>
+            <?php endif; ?>
+            <p>Informe o domínio de staging a corrigir e clique em Dry Run — ele mostra o que seria alterado <strong>sem escrever nada no banco</strong>.</p>
 
-            <form method="post" action="<?php echo esc_url( admin_url('admin-post.php') ); ?>">
+            <form method="post" action="<?php echo esc_url( admin_url('admin-post.php') ); ?>" style="display:flex;align-items:center;gap:8px;">
                 <?php wp_nonce_field( 'cac_staging_dry_run' ); ?>
                 <input type="hidden" name="action" value="cac_staging_dry_run">
-                <input type="hidden" name="staging_domain" value="<?php echo esc_attr( $domains[0] ?? '' ); ?>">
+                <label for="staging_domain"><strong>Domínio de staging:</strong></label>
+                <input type="text" name="staging_domain" id="staging_domain" value="<?php echo esc_attr( $domains[0] ?? '' ); ?>" placeholder="ex: site.stackstaging.com" style="width:350px;" required>
                 <button type="submit" class="button button-secondary">🔍 Executar Dry Run</button>
             </form>
-            <?php endif; ?>
 
             <?php if ( isset( $_GET['dry_run'] ) && ! empty( $dry ) ) : ?>
             <h2 style="margin-top:25px;">Resultado do Dry Run (<?php echo esc_html( $dry['ran_at'] ?? '' ); ?>)</h2>
